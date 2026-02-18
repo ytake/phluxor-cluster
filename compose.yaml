@@ -1,0 +1,10 @@
+services:
+  php:
+    build: .
+    container_name: php
+    volumes:
+      - ./:/app
+    working_dir: /app
+    ports:
+      - 50052:50052
+      - 50053:50053

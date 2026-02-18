@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package cluster;
+
+import "actor.proto";
+
+option php_namespace = "Phluxor\\Cluster\\ProtoBuf";
+option php_metadata_namespace = "Phluxor\\Cluster\\Metadata";
+
+// Virtual Actor の一意識別子
+message ClusterIdentity {
+  string identity = 1;
+  string kind = 2;
+}
+
+// アクティベーション要求
+message ActivationRequest {
+  ClusterIdentity cluster_identity = 1;
+  string request_id = 2;
+  uint64 topology_hash = 3;
+}
+
+// アクティベーション応答
+message ActivationResponse {
+  actor.Pid pid = 1;
+  bool failed = 2;
+  uint64 topology_hash = 3;
+}
+
+// アクティベーション終了通知
+message ActivationTerminated {
+  actor.Pid pid = 1;
+  ClusterIdentity cluster_identity = 2;
+}
+
+// クラスタトポロジー
+message ClusterTopology {
+  uint64 topology_hash = 1;
+  repeated Member members = 2;
+  repeated Member joined = 3;
+  repeated Member left = 4;
+  repeated string blocked = 5;
+}
+
+// クラスタメンバー
+message Member {
+  string host = 1;
+  int32 port = 2;
+  string id = 3;
+  repeated string kinds = 4;
+}
+
+// Grain リクエスト
+message GrainRequest {
+  int32 method_index = 1;
+  bytes message_data = 2;
+  string message_type_name = 3;
+}
+
+// Grain レスポンス
+message GrainResponse {
+  bytes message_data = 1;
+  string message_type_name = 2;
+}
+
+// Grain エラーレスポンス
+message GrainErrorResponse {
+  string error = 1;
+  int32 code = 2;
+}
+
+// --- Gossip Protocol ---
+
+// 全メンバーのゴシップ状態
+message GossipState {
+  map<string, GossipMemberState> members = 1;
+}
+
+// 1メンバーのゴシップ状態
+message GossipMemberState {
+  map<string, GossipKeyValue> values = 1;
+}
+
+// ゴシップのキーバリューエントリ
+message GossipKeyValue {
+  bytes value = 1;
+  string value_type_name = 2;
+  int64 sequence_number = 3;
+  int64 local_timestamp_unix_milliseconds = 4;
+}
+
+// メンバーハートビート
+message MemberHeartbeat {
+  ActorStatistics actor_statistics = 1;
+}
+
+// アクター統計
+message ActorStatistics {
+  map<string, int64> actor_count = 1;
+}
+
+// ゴシップリクエスト
+message GossipRequest {
+  GossipState state = 1;
+  string member_id = 2;
+}
+
+// ゴシップレスポンス
+message GossipResponse {
+  GossipState state = 1;
+}

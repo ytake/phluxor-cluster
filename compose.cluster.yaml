@@ -1,0 +1,30 @@
+services:
+  node1:
+    build: .
+    container_name: cluster-node1
+    volumes:
+      - ./:/app
+    working_dir: /app
+    ports:
+      - 50052:50052
+      - 6330:6330
+    command: ["tail", "-f", "/dev/null"]
+    networks:
+      - cluster
+
+  node2:
+    build: .
+    container_name: cluster-node2
+    volumes:
+      - ./:/app
+    working_dir: /app
+    ports:
+      - 50053:50053
+      - 6331:6331
+    command: ["tail", "-f", "/dev/null"]
+    networks:
+      - cluster
+
+networks:
+  cluster:
+    driver: bridge

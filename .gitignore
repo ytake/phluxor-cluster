@@ -1,0 +1,13 @@
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md
+vendor/
+.serena
+.agent
+.claude
+.codex
+.gemini
+.phpunit*
+.takt
+.codacy
+composer.lock
+docs/process/

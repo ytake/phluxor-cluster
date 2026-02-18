@@ -1,0 +1,12 @@
+parameters:
+    fileExtensions:
+        - php
+    paths:
+        - src
+    excludePaths:
+        - src/Phluxor/Cluster/ProtoBuf/**
+        - src/Phluxor/Cluster/Metadata/**
+    level: max
+    treatPhpDocTypesAsCertain: false
+    scanDirectories:
+       - vendor/swoole/ide-helper

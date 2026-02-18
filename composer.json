@@ -1,0 +1,70 @@
+{
+  "name": "phluxor/phluxor-cluster",
+  "license": "Apache-2.0",
+  "type": "library",
+  "keywords": [
+    "actor",
+    "actor-model",
+    "actor-system",
+    "actor-toolkit",
+    "async",
+    "swoole"
+  ],
+  "authors": [
+    {
+      "name": "Yuuki Takezawa",
+      "email": "yuuki.takezawa@comnect.jp.net"
+    }
+  ],
+  "description": "remoting library for phluxor / actor model",
+  "require": {
+    "php": "^8.4",
+    "ext-swoole": "*",
+    "google/protobuf": "^v3.25.5",
+    "phluxor/phluxor": "^0.2.2",
+    "phluxor/phluxor-websocket": "^0.2.1"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5.11",
+    "phpstan/phpstan": "^1.10.67",
+    "swoole/ide-helper": "^5.0.0",
+    "squizlabs/php_codesniffer": "^3.10.1",
+    "slevomat/coding-standard": "^8.15.0"
+  },
+  "suggest": {
+    "ext-opentelemetry": "Automatic instrumentation with PHP requires at least PHP 8.0",
+    "ext-protobuf": "serialization with protobuf"
+  },
+  "autoload": {
+    "psr-4": {
+      "Phluxor\\Cluster\\": "src/Phluxor/Cluster"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Test\\": "tests/Test"
+    }
+  },
+  "scripts": {
+    "tests": [
+      "./vendor/bin/phpunit"
+    ],
+    "cs": [
+      "Composer\\Config::disableProcessTimeout",
+      "phpcs --standard=./phpcs.xml --ignore=*/ProtoBuf/*,*/Metadata/* src tests"
+    ],
+    "cs-fix": [
+      "Composer\\Config::disableProcessTimeout",
+      "./vendor/bin/phpcbf --ignore=*/ProtoBuf/*,*/Metadata/* src tests"
+    ]
+  },
+  "config": {
+    "optimize-autoloader": true,
+    "preferred-install": "dist",
+    "sort-packages": true,
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true,
+      "php-http/discovery": true
+    }
+  }
+}
