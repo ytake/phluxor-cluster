@@ -11,7 +11,7 @@ use Phluxor\Cluster\Gossip\GossipKeys;
 use Phluxor\Cluster\Gossip\Gossiper;
 use Phluxor\EventStream\Subscription;
 
-final class Cluster
+class Cluster
 {
     private BlockList $blockList;
 
