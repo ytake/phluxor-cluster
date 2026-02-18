@@ -6,11 +6,12 @@ namespace Phluxor\Cluster;
 
 use Phluxor\ActorSystem;
 use Phluxor\ActorSystem\Ref;
+use Phluxor\Cluster\Gossip\ConsensusCheck;
 use Phluxor\Cluster\Gossip\GossipKeys;
 use Phluxor\Cluster\Gossip\Gossiper;
 use Phluxor\EventStream\Subscription;
 
-class Cluster
+final class Cluster
 {
     private BlockList $blockList;
 
@@ -131,6 +132,24 @@ class Cluster
         return $this->clusterContext?->request($identity, $kind, $message, $config);
     }
 
+    /**
+     * コンセンサスチェックを登録する。
+     * クラスタ全メンバーが特定のゴシップキーに対して同じ値を持つかを
+     * 定期的に検証するためのコールバックを設定する。
+     */
+    public function registerConsensusCheck(ConsensusCheck $check): void
+    {
+        $this->gossiper?->registerConsensusCheck($check);
+    }
+
+    /**
+     * IDで指定されたコンセンサスチェックを削除する。
+     */
+    public function removeConsensusCheck(string $id): void
+    {
+        $this->gossiper?->removeConsensusCheck($id);
+    }
+
     private function subscribeToTopologyEvents(): void
     {
         $this->topologySub = $this->actorSystem->getEventStream()?->subscribe(
@@ -144,7 +163,12 @@ class Cluster
 
     private function onClusterTopology(ClusterTopologyEvent $event): void
     {
+        // MemberList から責務を引き受け、Cluster がトポロジー変更の副作用を一元管理する。
+        // left メンバーを BlockList に追加し、PidCache からエントリを削除する。
         foreach ($event->left() as $member) {
+            if (!$this->blockList->isBlocked($member->id())) {
+                $this->blockList->block($member->id());
+            }
             $this->pidCache->removeByMember($member->address());
         }
     }

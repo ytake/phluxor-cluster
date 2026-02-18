@@ -10,7 +10,7 @@ final class RendezvousHashSelector
 {
     /**
      * @param string $key
-     * @param Member[] $members
+     * @param list<Member> $members
      * @return string|null
      */
     public function getPartition(string $key, array $members): ?string
@@ -37,7 +37,7 @@ final class RendezvousHashSelector
 
     /**
      * @param string $senderAddress
-     * @param Member[] $members
+     * @param list<Member> $members
      * @return string|null
      */
     public function getActivator(string $senderAddress, array $members): ?string

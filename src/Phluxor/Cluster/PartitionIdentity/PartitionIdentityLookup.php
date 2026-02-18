@@ -28,6 +28,12 @@ final class PartitionIdentityLookup implements IdentityLookupInterface
      */
     public function setup(Cluster $cluster, array $kinds, bool $isClient): void
     {
+        // クライアントノードはGrainをアクティベートしないため、
+        // PartitionPlacementActorをスポーンしない
+        if ($isClient) {
+            return;
+        }
+
         $this->manager = new PartitionManager($cluster);
         $this->manager->start();
     }

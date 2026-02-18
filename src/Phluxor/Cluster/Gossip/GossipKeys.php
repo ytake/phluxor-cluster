@@ -11,4 +11,9 @@ final class GossipKeys
     public const string HEARTBEAT = 'heartbeat';
 
     public const string GRACEFULLY_LEFT = 'left';
+
+    /** インスタンス化防止 */
+    private function __construct()
+    {
+    }
 }
