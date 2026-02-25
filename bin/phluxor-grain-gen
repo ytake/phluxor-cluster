@@ -2,14 +2,15 @@
 <?php
 
 /**
- * Grain RPC コード生成ツール
+ * Phluxor Grain コード生成ツール
  *
  * GrainBase を継承した Actor クラスと GrainClient を継承した Client クラスを生成する。
  *
  * Usage:
- *   php tools/GrainGenerator.php --definition=path/to/grain_definition.php --output=src/Generated/
+ *   vendor/bin/phluxor-grain-gen --definition=path/to/grains.php --output=src/Generated/
  *
- * Definition file format: see examples/grain_definition.example.php
+ * Definition file: 1つまたは複数の Grain 定義を返す PHP ファイル
+ *   see: vendor/phluxor/phluxor-cluster/examples/grain_definition.example.php
  */
 
 declare(strict_types=1);
@@ -17,51 +18,40 @@ declare(strict_types=1);
 final class GrainGenerator
 {
     public function __construct(
-        private readonly string $definitionPath,
         private readonly string $outputDir,
     ) {
     }
 
-    public function generate(): void
+    /**
+     * @param list<array<string, mixed>> $definitions
+     */
+    public function generateAll(array $definitions): void
     {
-        $def = $this->loadDefinition();
-        $this->validateDefinition($def);
-
         if (!is_dir($this->outputDir) && !mkdir($this->outputDir, 0755, true)) {
             throw new \RuntimeException("Failed to create output directory: {$this->outputDir}");
         }
 
-        $actorCode = $this->renderActor($def);
-        $clientCode = $this->renderClient($def);
-
-        $kind = $def['kind'];
-        $actorFile = rtrim($this->outputDir, '/') . "/{$kind}Actor.php";
-        $clientFile = rtrim($this->outputDir, '/') . "/{$kind}Client.php";
-
-        file_put_contents($actorFile, $actorCode);
-        file_put_contents($clientFile, $clientCode);
-
-        echo "Generated: {$actorFile}\n";
-        echo "Generated: {$clientFile}\n";
+        foreach ($definitions as $def) {
+            $this->generateOne($def);
+        }
     }
 
     /**
-     * @return array<string, mixed>
+     * @param array<string, mixed> $def
      */
-    private function loadDefinition(): array
+    private function generateOne(array $def): void
     {
-        if (!file_exists($this->definitionPath)) {
-            throw new \InvalidArgumentException("Definition file not found: {$this->definitionPath}");
-        }
+        $this->validateDefinition($def);
 
-        /** @var array<string, mixed> $def */
-        $def = require $this->definitionPath;
+        $kind = (string) $def['kind'];
+        $actorFile  = rtrim($this->outputDir, '/') . "/{$kind}Actor.php";
+        $clientFile = rtrim($this->outputDir, '/') . "/{$kind}Client.php";
 
-        if (!is_array($def)) {
-            throw new \InvalidArgumentException("Definition file must return an array.");
-        }
+        file_put_contents($actorFile, $this->renderActor($def));
+        file_put_contents($clientFile, $this->renderClient($def));
 
-        return $def;
+        echo "  Generated: {$actorFile}\n";
+        echo "  Generated: {$clientFile}\n";
     }
 
     /**
@@ -71,12 +61,13 @@ final class GrainGenerator
     {
         foreach (['namespace', 'proto_namespace', 'kind', 'methods'] as $key) {
             if (!isset($def[$key])) {
-                throw new \InvalidArgumentException("Missing required key '{$key}' in definition.");
+                $kind = $def['kind'] ?? '(unknown)';
+                throw new \InvalidArgumentException("Missing required key '{$key}' in definition for '{$kind}'.");
             }
         }
 
         if (!is_array($def['methods']) || $def['methods'] === []) {
-            throw new \InvalidArgumentException("'methods' must be a non-empty array.");
+            throw new \InvalidArgumentException("'methods' must be a non-empty array in definition for '{$def['kind']}'.");
         }
     }
 
@@ -141,7 +132,7 @@ final class GrainGenerator
         /** @var array<int, array<string, string>> $methods */
         $methods    = $def['methods'];
 
-        $uses        = $this->buildClientUses($protoNs, $methods);
+        $uses          = $this->buildActorUses($protoNs, $methods);
         $clientMethods = $this->buildClientMethods($methods);
 
         return <<<PHP
@@ -185,14 +176,6 @@ final class GrainGenerator
         sort($classes);
 
         return implode("\n", array_map(static fn(string $c) => "use {$c};", $classes));
-    }
-
-    /**
-     * @param array<int, array<string, string>> $methods
-     */
-    private function buildClientUses(string $protoNs, array $methods): string
-    {
-        return $this->buildActorUses($protoNs, $methods);
     }
 
     /**
@@ -273,16 +256,44 @@ final class GrainGenerator
 
 $opts = getopt('', ['definition:', 'output:']);
 
-$definition = $opts['definition'] ?? null;
-$output     = $opts['output'] ?? null;
+$definitionPath = $opts['definition'] ?? null;
+$outputDir      = $opts['output'] ?? null;
 
-if ($definition === null || $output === null) {
-    fwrite(STDERR, "Usage: php tools/GrainGenerator.php --definition=<path> --output=<dir>\n");
+if ($definitionPath === null || $outputDir === null) {
+    fwrite(STDERR, "Usage: phluxor-grain-gen --definition=<path> --output=<dir>\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "  --definition  Grain 定義ファイルへのパス\n");
+    fwrite(STDERR, "  --output      生成ファイルの出力先ディレクトリ\n");
+    fwrite(STDERR, "\n");
+    fwrite(STDERR, "Definition file format: vendor/phluxor/phluxor-cluster/examples/grain_definition.example.php\n");
     exit(1);
 }
 
+if (!file_exists((string) $definitionPath)) {
+    fwrite(STDERR, "Error: Definition file not found: {$definitionPath}\n");
+    exit(1);
+}
+
+/** @var mixed $loaded */
+$loaded = require (string) $definitionPath;
+
+if (!is_array($loaded)) {
+    fwrite(STDERR, "Error: Definition file must return an array.\n");
+    exit(1);
+}
+
+// 単一定義（'kind' キーあり）と複数定義（配列の配列）を自動判別
+// Single:   ['kind' => 'Foo', 'namespace' => ..., ...]
+// Multiple: [['kind' => 'Foo', ...], ['kind' => 'Bar', ...]]
+/** @var list<array<string, mixed>> $definitions */
+$definitions = isset($loaded['kind']) ? [$loaded] : array_values($loaded);
+
+$count = count($definitions);
+echo "Generating {$count} grain(s) into {$outputDir} ...\n";
+
 try {
-    (new GrainGenerator((string) $definition, (string) $output))->generate();
+    (new GrainGenerator((string) $outputDir))->generateAll($definitions);
+    echo "Done.\n";
 } catch (\Throwable $e) {
     fwrite(STDERR, "Error: {$e->getMessage()}\n");
     exit(1);

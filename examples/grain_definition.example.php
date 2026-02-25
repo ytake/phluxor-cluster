@@ -4,38 +4,63 @@
  * Grain 定義ファイルのサンプル
  *
  * Usage:
- *   php tools/GrainGenerator.php \
+ *   vendor/bin/phluxor-grain-gen \
  *     --definition=examples/grain_definition.example.php \
  *     --output=src/Generated/
  *
- * Generated files:
- *   src/Generated/HelloGrainActor.php  — abstract class (server-side, extend and implement)
- *   src/Generated/HelloGrainClient.php — final class (client-side, use directly)
+ * このファイルは複数の Grain を一度に定義できる。
+ * 単一 Grain の場合は配列を1つ返すだけでよい。
+ *
+ * Generated files (per grain):
+ *   src/Generated/{Kind}Actor.php  — abstract class（サーバー側: 継承して実装）
+ *   src/Generated/{Kind}Client.php — final class  （クライアント側: そのまま使用）
  */
 
 declare(strict_types=1);
 
 return [
-    // 生成クラスの namespace
-    'namespace'       => 'YourApp\\Grain',
+    // --- Grain 1 ---
+    [
+        // 生成クラスの namespace
+        'namespace'       => 'YourApp\\Grain',
 
-    // ProtoBuf メッセージクラスの namespace
-    'proto_namespace' => 'YourApp\\Protobuf',
+        // ProtoBuf メッセージクラスの namespace
+        'proto_namespace' => 'YourApp\\Protobuf',
 
-    // Grain の種別名（KindRegistry に登録する文字列）
-    'kind'            => 'HelloGrain',
+        // Grain の種別名（KindRegistry に登録する文字列と一致させる）
+        'kind'            => 'HelloGrain',
 
-    // RPC メソッド定義（.proto の rpc 定義順に並べる）
-    'methods'         => [
-        [
-            'name'     => 'sayHello',
-            'request'  => 'HelloRequest',
-            'response' => 'HelloResponse',
+        // RPC メソッド定義（.proto の rpc 定義順に並べる）
+        'methods'         => [
+            [
+                'name'     => 'sayHello',
+                'request'  => 'HelloRequest',
+                'response' => 'HelloResponse',
+            ],
+            [
+                'name'     => 'sayGoodbye',
+                'request'  => 'GoodbyeRequest',
+                'response' => 'GoodbyeResponse',
+            ],
         ],
-        [
-            'name'     => 'sayGoodbye',
-            'request'  => 'GoodbyeRequest',
-            'response' => 'GoodbyeResponse',
+    ],
+
+    // --- Grain 2 ---
+    [
+        'namespace'       => 'YourApp\\Grain',
+        'proto_namespace' => 'YourApp\\Protobuf',
+        'kind'            => 'CounterGrain',
+        'methods'         => [
+            [
+                'name'     => 'increment',
+                'request'  => 'IncrementRequest',
+                'response' => 'CounterResponse',
+            ],
+            [
+                'name'     => 'getCount',
+                'request'  => 'GetCountRequest',
+                'response' => 'CounterResponse',
+            ],
         ],
     ],
 ];
