@@ -27,6 +27,22 @@ final class ClusterConfigTest extends TestCase
         self::assertSame(3, $config->gossipFanOut());
         self::assertSame(20000, $config->heartbeatExpirationMs());
         self::assertSame(5, $config->requestTimeoutSeconds());
+        self::assertSame(5, $config->pubSubSubscriberTimeoutSeconds());
+    }
+
+    public function testCustomPubSubSubscriberTimeout(): void
+    {
+        $config = new ClusterConfig(
+            'test-cluster',
+            'localhost',
+            50052,
+            $this->createMock(ClusterProviderInterface::class),
+            $this->createMock(IdentityLookupInterface::class),
+            new KindRegistry(),
+            pubSubSubscriberTimeoutSeconds: 15
+        );
+
+        self::assertSame(15, $config->pubSubSubscriberTimeoutSeconds());
     }
 
     public function testNameAndAccessors(): void

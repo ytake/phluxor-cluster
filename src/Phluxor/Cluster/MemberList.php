@@ -118,7 +118,8 @@ final class MemberList
                 $this->memberStrategyByKind[$kind]->removeMember($member);
             }
         }
-        $this->blockList->block($member->id());
+        // BlockList への書き込みは呼び出し元（Cluster）が ClusterTopologyEvent.left()
+        // を見て行うため、ここでは MemberStrategy の更新のみを行う。
     }
 
     private function getMemberStrategyByKind(string $kind): MemberStrategyInterface

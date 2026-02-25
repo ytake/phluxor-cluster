@@ -5,9 +5,24 @@ declare(strict_types=1);
 namespace Phluxor\Cluster;
 
 use Phluxor\ActorSystem;
+use Phluxor\ActorSystem\Message\ReceiveFunction;
+use Phluxor\ActorSystem\Props;
+use Phluxor\ActorSystem\ProtoBuf\Pid;
 use Phluxor\ActorSystem\Ref;
+use Phluxor\Cluster\Gossip\ConsensusCheck;
 use Phluxor\Cluster\Gossip\GossipKeys;
 use Phluxor\Cluster\Gossip\Gossiper;
+use Phluxor\Cluster\ProtoBuf\SubscribeRequest;
+use Phluxor\Cluster\ProtoBuf\SubscribeResponse;
+use Phluxor\Cluster\ProtoBuf\SubscriberIdentity;
+use Phluxor\Cluster\ProtoBuf\UnsubscribeRequest;
+use Phluxor\Cluster\ProtoBuf\UnsubscribeResponse;
+use Phluxor\Cluster\PubSub\BatchingProducer;
+use Phluxor\Cluster\PubSub\BatchingProducerConfig;
+use Phluxor\Cluster\PubSub\EmptyKeyValueStore;
+use Phluxor\Cluster\PubSub\Publisher;
+use Phluxor\Cluster\PubSub\PubSubExtension;
+use Phluxor\Cluster\PubSub\TopicActor;
 use Phluxor\EventStream\Subscription;
 
 class Cluster
@@ -67,6 +82,12 @@ class Cluster
         $this->actorSystem->getProcessRegistry()->setAddress($this->config->address());
         $this->actorSystem->extensions()->set(new ClusterExtension($this));
 
+        self::ensureTopicKindRegistered($this->config->kindRegistry());
+
+        $pubSub = new PubSubExtension($this, $this->config->pubSubSubscriberTimeoutSeconds());
+        $this->actorSystem->extensions()->set($pubSub);
+        $pubSub->start();
+
         $this->memberList = new MemberList($this->blockList);
         $this->clusterContext = new DefaultClusterContext($this);
 
@@ -84,6 +105,8 @@ class Cluster
     {
         $this->actorSystem->getProcessRegistry()->setAddress($this->config->address());
         $this->actorSystem->extensions()->set(new ClusterExtension($this));
+
+        self::ensureTopicKindRegistered($this->config->kindRegistry());
 
         $this->memberList = new MemberList($this->blockList);
         $this->clusterContext = new DefaultClusterContext($this);
@@ -131,6 +154,156 @@ class Cluster
         return $this->clusterContext?->request($identity, $kind, $message, $config);
     }
 
+    /**
+     * コンセンサスチェックを登録する。
+     * クラスタ全メンバーが特定のゴシップキーに対して同じ値を持つかを
+     * 定期的に検証するためのコールバックを設定する。
+     */
+    public function registerConsensusCheck(ConsensusCheck $check): void
+    {
+        $this->gossiper?->registerConsensusCheck($check);
+    }
+
+    /**
+     * IDで指定されたコンセンサスチェックを削除する。
+     */
+    public function removeConsensusCheck(string $id): void
+    {
+        $this->gossiper?->removeConsensusCheck($id);
+    }
+
+    private const string TOPIC_ACTOR_KIND = 'prototopic';
+
+    public function subscribeByPid(
+        string $topic,
+        Pid $pid,
+        ?GrainCallConfig $config = null
+    ): ?SubscribeResponse {
+        $identity = new SubscriberIdentity();
+        $identity->setPid($pid);
+        $request = new SubscribeRequest();
+        $request->setSubscriber($identity);
+
+        $res = $this->request($topic, self::TOPIC_ACTOR_KIND, $request, $config);
+        if ($res instanceof SubscribeResponse) {
+            return $res;
+        }
+        return null;
+    }
+
+    public function subscribeByClusterIdentity(
+        string $topic,
+        ClusterIdentity $clusterIdentity,
+        ?GrainCallConfig $config = null
+    ): ?SubscribeResponse {
+        $ci = new ProtoBuf\ClusterIdentity([
+            'identity' => $clusterIdentity->identity(),
+            'kind' => $clusterIdentity->kind(),
+        ]);
+        $identity = new SubscriberIdentity();
+        $identity->setClusterIdentity($ci);
+        $request = new SubscribeRequest();
+        $request->setSubscriber($identity);
+
+        $res = $this->request($topic, self::TOPIC_ACTOR_KIND, $request, $config);
+        if ($res instanceof SubscribeResponse) {
+            return $res;
+        }
+        return null;
+    }
+
+    public function subscribeWithReceive(
+        string $topic,
+        ReceiveFunction $receive,
+        ?GrainCallConfig $config = null
+    ): ?SubscribeResponse {
+        $props = Props::fromFunction($receive);
+        $ref = $this->actorSystem->root()->spawn($props);
+        if ($ref === null) {
+            return null;
+        }
+        return $this->subscribeByPid($topic, $ref->protobufPid(), $config);
+    }
+
+    public function unsubscribeByPid(
+        string $topic,
+        Pid $pid,
+        ?GrainCallConfig $config = null
+    ): ?UnsubscribeResponse {
+        $identity = new SubscriberIdentity();
+        $identity->setPid($pid);
+        $request = new UnsubscribeRequest();
+        $request->setSubscriber($identity);
+
+        $res = $this->request($topic, self::TOPIC_ACTOR_KIND, $request, $config);
+        if ($res instanceof UnsubscribeResponse) {
+            return $res;
+        }
+        return null;
+    }
+
+    public function unsubscribeByClusterIdentity(
+        string $topic,
+        ClusterIdentity $clusterIdentity,
+        ?GrainCallConfig $config = null
+    ): ?UnsubscribeResponse {
+        $ci = new ProtoBuf\ClusterIdentity([
+            'identity' => $clusterIdentity->identity(),
+            'kind' => $clusterIdentity->kind(),
+        ]);
+        $identity = new SubscriberIdentity();
+        $identity->setClusterIdentity($ci);
+        $request = new UnsubscribeRequest();
+        $request->setSubscriber($identity);
+
+        $res = $this->request($topic, self::TOPIC_ACTOR_KIND, $request, $config);
+        if ($res instanceof UnsubscribeResponse) {
+            return $res;
+        }
+        return null;
+    }
+
+    public function unsubscribeByIdentityAndKind(
+        string $topic,
+        string $identity,
+        string $kind,
+        ?GrainCallConfig $config = null
+    ): ?UnsubscribeResponse {
+        return $this->unsubscribeByClusterIdentity(
+            $topic,
+            new ClusterIdentity($identity, $kind),
+            $config
+        );
+    }
+
+    public function publisher(): Publisher
+    {
+        return new Publisher($this);
+    }
+
+    public function batchingProducer(
+        string $topic,
+        ?BatchingProducerConfig $config = null
+    ): BatchingProducer {
+        return new BatchingProducer(
+            $this->publisher(),
+            $topic,
+            $config ?? new BatchingProducerConfig()
+        );
+    }
+
+    public static function ensureTopicKindRegistered(KindRegistry $registry): void
+    {
+        $topicKind = self::TOPIC_ACTOR_KIND;
+        if ($registry->has($topicKind)) {
+            return;
+        }
+        $props = Props::fromProducer(
+            fn() => new TopicActor(new EmptyKeyValueStore())
+        );
+        $registry->register(new ActivatedKind($topicKind, $props));
+    }
+
     private function subscribeToTopologyEvents(): void
     {
         $this->topologySub = $this->actorSystem->getEventStream()?->subscribe(
@@ -144,7 +317,12 @@ class Cluster
 
     private function onClusterTopology(ClusterTopologyEvent $event): void
     {
+        // MemberList から責務を引き受け、Cluster がトポロジー変更の副作用を一元管理する。
+        // left メンバーを BlockList に追加し、PidCache からエントリを削除する。
         foreach ($event->left() as $member) {
+            if (!$this->blockList->isBlocked($member->id())) {
+                $this->blockList->block($member->id());
+            }
             $this->pidCache->removeByMember($member->address());
         }
     }

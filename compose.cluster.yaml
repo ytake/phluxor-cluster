@@ -8,6 +8,7 @@ services:
     ports:
       - 50052:50052
       - 6330:6330
+      - 7330:7330
     command: ["tail", "-f", "/dev/null"]
     networks:
       - cluster
@@ -21,6 +22,7 @@ services:
     ports:
       - 50053:50053
       - 6331:6331
+      - 7331:7331
     command: ["tail", "-f", "/dev/null"]
     networks:
       - cluster

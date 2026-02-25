@@ -23,7 +23,8 @@ use const SWOOLE_RWLOCK;
 
 final class PartitionManager
 {
-    private const string PARTITION_ACTIVATOR_ACTOR_NAME = 'partition-activator';
+    // アクター名の定数は PartitionPlacementActor で定義（共有）
+    private const string PARTITION_ACTIVATOR_ACTOR_NAME = PartitionPlacementActor::PARTITION_ACTIVATOR_ACTOR_NAME;
 
     private ?Ref $placementActor = null;
 
@@ -36,6 +37,10 @@ final class PartitionManager
     /** @var list<Member> */
     private array $currentMembers = [];
 
+    private int $currentTopologyHash = 0;
+
+    private bool $started = false;
+
     public function __construct(
         private readonly Cluster $cluster
     ) {
@@ -43,17 +48,19 @@ final class PartitionManager
         $this->rdvMutex = new Lock(SWOOLE_RWLOCK);
     }
 
-    public function start(): void
+    public function start(bool $isClient = false): void
     {
         $system = $this->cluster->actorSystem();
-        $cluster = $this->cluster;
+        if (!$isClient) {
+            $cluster = $this->cluster;
 
-        $props = Props::fromProducer(
-            fn() => new PartitionPlacementActor($cluster)
-        );
+            $props = Props::fromProducer(
+                fn() => new PartitionPlacementActor($cluster)
+            );
 
-        $result = $system->root()->spawnNamed($props, self::PARTITION_ACTIVATOR_ACTOR_NAME);
-        $this->placementActor = $result->getRef();
+            $result = $system->root()->spawnNamed($props, self::PARTITION_ACTIVATOR_ACTOR_NAME);
+            $this->placementActor = $result->getRef();
+        }
 
         $this->topologySub = $system->getEventStream()?->subscribe(
             function (mixed $event): void {
@@ -62,6 +69,7 @@ final class PartitionManager
                 }
             }
         );
+        $this->started = true;
     }
 
     public function stop(): void
@@ -78,56 +86,74 @@ final class PartitionManager
             $future?->wait();
             $this->placementActor = null;
         }
+
+        $this->started = false;
     }
 
     public function get(ClusterIdentity $clusterIdentity): ?Ref
     {
+        // RWLOCK 保持中にブロッキング I/O を行うとデッドロックが発生するため、
+        // ロック内ではトポロジー情報の読み取りのみを行い、
+        // ネットワークリクエストはロック解放後に実行する。
         $this->rdvMutex->lock_read();
         try {
             $ownerAddress = $this->rdv->getPartition(
                 $clusterIdentity->toKey(),
                 $this->currentMembers
             );
-
-            if ($ownerAddress === null) {
-                return null;
-            }
-
-            $ownerRef = $this->pidOfActivatorActor($ownerAddress);
-
-            $pbIdentity = new ProtoBufClusterIdentity();
-            $pbIdentity->setIdentity($clusterIdentity->identity());
-            $pbIdentity->setKind($clusterIdentity->kind());
-
-            $request = new ActivationRequest();
-            $request->setClusterIdentity($pbIdentity);
-
-            $future = $this->cluster->actorSystem()->root()->requestFuture(
-                $ownerRef,
-                $request,
-                $this->cluster->config()->requestTimeoutSeconds()
-            );
-
-            $result = $future->result();
-            if ($result->error() !== null) {
-                return null;
-            }
-
-            $response = $result->value();
-            if (!$response instanceof ActivationResponse || $response->getFailed()) {
-                return null;
-            }
-
-            $pid = $response->getPid();
-            return $pid !== null ? new Ref($pid) : null;
+            $topologyHash = $this->currentTopologyHash;
         } finally {
             $this->rdvMutex->unlock();
         }
+
+        if ($ownerAddress === null) {
+            return null;
+        }
+
+        $ownerRef = $this->pidOfActivatorActor($ownerAddress);
+
+        $pbIdentity = new ProtoBufClusterIdentity();
+        $pbIdentity->setIdentity($clusterIdentity->identity());
+        $pbIdentity->setKind($clusterIdentity->kind());
+
+        $request = new ActivationRequest();
+        $request->setClusterIdentity($pbIdentity);
+        $request->setTopologyHash($topologyHash);
+        // 冪等性保証のためユニークなリクエストIDを付与する
+        $request->setRequestId(uniqid('activation-', true));
+
+        $future = $this->cluster->actorSystem()->root()->requestFuture(
+            $ownerRef,
+            $request,
+            $this->cluster->config()->requestTimeoutSeconds()
+        );
+
+        $result = $future->result();
+        if ($result->error() !== null) {
+            return null;
+        }
+
+        $response = $result->value();
+        if (!$response instanceof ActivationResponse) {
+            return null;
+        }
+
+        $responseTopologyHash = (int) $response->getTopologyHash();
+        if ($responseTopologyHash !== 0 && $responseTopologyHash !== $topologyHash) {
+            return null;
+        }
+
+        if ($response->getFailed()) {
+            return null;
+        }
+
+        $pid = $response->getPid();
+        return $pid !== null ? new Ref($pid) : null;
     }
 
     public function removePid(ClusterIdentity $clusterIdentity, Ref $pid): void
     {
-        if ($this->placementActor === null) {
+        if (!$this->started) {
             return;
         }
 
@@ -158,6 +184,7 @@ final class PartitionManager
         $this->rdvMutex->lock();
         try {
             $this->currentMembers = $topology->members();
+            $this->currentTopologyHash = $topology->topologyHash();
             if ($this->placementActor !== null) {
                 $this->cluster->actorSystem()->root()->send($this->placementActor, $topology);
             }

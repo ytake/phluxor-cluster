@@ -63,7 +63,7 @@ final class MemberListTest extends TestCase
         self::assertNull($event);
     }
 
-    public function testLeftMembersAreBlocked(): void
+    public function testUpdateTopologyEventContainsLeftMembersForCaller(): void
     {
         $blockList = new BlockList();
         $memberList = new MemberList($blockList);
@@ -71,10 +71,16 @@ final class MemberListTest extends TestCase
         $m2 = new Member('host2', 50052, 'node-2', ['grain1']);
 
         $memberList->updateClusterTopology(new MemberSet($m1, $m2));
-        $memberList->updateClusterTopology(new MemberSet($m1));
+        $event = $memberList->updateClusterTopology(new MemberSet($m1));
 
-        self::assertTrue($blockList->isBlocked('node-2'));
-        self::assertFalse($blockList->isBlocked('node-1'));
+        // MemberList は left メンバーを ClusterTopologyEvent に含めて返す。
+        // BlockList への追加は呼び出し元（Cluster）の責務。
+        self::assertNotNull($event);
+        self::assertCount(1, $event->left());
+        self::assertSame('node-2', $event->left()[0]->id());
+
+        // MemberList 単体では BlockList には追加しない
+        self::assertFalse($blockList->isBlocked('node-2'));
     }
 
     public function testBlockedMembersAreFilteredFromNewTopology(): void
@@ -84,10 +90,18 @@ final class MemberListTest extends TestCase
         $m1 = new Member('host1', 50051, 'node-1', ['grain1']);
         $m2 = new Member('host2', 50052, 'node-2', ['grain1']);
 
+        // step1: m1, m2 で初期化
         $memberList->updateClusterTopology(new MemberSet($m1, $m2));
+
+        // step2: BlockList への書き込みは Cluster の責務。
+        // テストでは Cluster 相当の処理として直接 block() を呼ぶ。
+        $blockList->block('node-2');
+
+        // step3: m1 のみのトポロジーで内部状態を [m1] に更新
         $memberList->updateClusterTopology(new MemberSet($m1));
 
-        // node-2 is now blocked. Even if it re-appears, it should be filtered out
+        // step4: node-2 がブロックされた状態で再度 m1, m2 のトポロジーが来ても
+        // MemberList は node-2 をフィルタリングし、変化なし（null）を返す。
         $event = $memberList->updateClusterTopology(new MemberSet($m1, $m2));
 
         self::assertNull($event);

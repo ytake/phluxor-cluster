@@ -152,6 +152,23 @@ final class GossipInformerTest extends TestCase
 
         self::assertInstanceOf(GossipState::class, $protobuf);
         self::assertCount(2, $protobuf->getMembers());
+
+        // MapField への代入が実際に反映されていることを検証する
+        $members = $protobuf->getMembers();
+        self::assertTrue(isset($members['member-1']), 'member-1 が GossipState に含まれている');
+        self::assertTrue(isset($members['member-2']), 'member-2 が GossipState に含まれている');
+
+        /** @var \Phluxor\Cluster\ProtoBuf\GossipMemberState $member1State */
+        $member1State = $members['member-1'];
+        $member1Values = $member1State->getValues();
+        self::assertCount(1, $member1Values, 'member-1 の values に 1 件含まれている');
+        self::assertTrue(isset($member1Values['heartbeat']), 'member-1 の heartbeat キーが存在する');
+
+        /** @var \Phluxor\Cluster\ProtoBuf\GossipMemberState $member2State */
+        $member2State = $members['member-2'];
+        $member2Values = $member2State->getValues();
+        self::assertCount(1, $member2Values, 'member-2 の values に 1 件含まれている');
+        self::assertTrue(isset($member2Values['heartbeat']), 'member-2 の heartbeat キーが存在する');
     }
 
     public function testRemoveMember(): void

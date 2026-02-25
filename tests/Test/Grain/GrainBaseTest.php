@@ -8,6 +8,7 @@ use PHPUnit\Framework\TestCase;
 use Phluxor\ActorSystem\Context\ContextInterface;
 use Phluxor\ActorSystem\Message\ActorInterface;
 use Phluxor\ActorSystem\Message\Started;
+use Phluxor\ActorSystem\Message\Stopping;
 use Phluxor\Cluster\Grain\GrainBase;
 use Phluxor\Cluster\ProtoBuf\GrainErrorResponse;
 use Phluxor\Cluster\ProtoBuf\GrainRequest;
@@ -40,7 +41,7 @@ final class GrainBaseTest extends TestCase
         self::assertSame(1, $grain->lastMethodIndex);
     }
 
-    public function testNonGrainRequestDispatchesToOnMessage(): void
+    public function testStartedMessageDispatchesToOnStarted(): void
     {
         $grain = new TestGrain();
         $context = $this->createMock(ContextInterface::class);
@@ -50,8 +51,43 @@ final class GrainBaseTest extends TestCase
 
         $grain->receive($context);
 
+        // Started は onStarted() にディスパッチされ、onMessage() には流れない
+        self::assertFalse($grain->grainRequestReceived);
+        self::assertFalse($grain->messageReceived);
+        self::assertTrue($grain->startedReceived);
+    }
+
+    public function testStoppingMessageDispatchesToOnStopping(): void
+    {
+        $grain = new TestGrain();
+        $context = $this->createMock(ContextInterface::class);
+
+        $stopping = new Stopping();
+        $context->method('message')->willReturn($stopping);
+
+        $grain->receive($context);
+
+        // Stopping は onStopping() にディスパッチされ、onMessage() には流れない
+        self::assertFalse($grain->grainRequestReceived);
+        self::assertFalse($grain->messageReceived);
+        self::assertTrue($grain->stoppingReceived);
+    }
+
+    public function testNonGrainRequestDispatchesToOnMessage(): void
+    {
+        $grain = new TestGrain();
+        $context = $this->createMock(ContextInterface::class);
+
+        // 上記以外のメッセージ（例: カスタムメッセージ）は onMessage() に流れる
+        $heartbeat = new MemberHeartbeat();
+        $context->method('message')->willReturn($heartbeat);
+
+        $grain->receive($context);
+
         self::assertFalse($grain->grainRequestReceived);
         self::assertTrue($grain->messageReceived);
+        self::assertFalse($grain->startedReceived);
+        self::assertFalse($grain->stoppingReceived);
     }
 
     public function testRespondGrainSendsGrainResponse(): void
@@ -102,6 +138,8 @@ final class TestGrain extends GrainBase
 {
     public bool $grainRequestReceived = false;
     public bool $messageReceived = false;
+    public bool $startedReceived = false;
+    public bool $stoppingReceived = false;
     public int $lastMethodIndex = -1;
 
     protected function onGrainRequest(GrainRequest $request, ContextInterface $context): void
@@ -110,9 +148,19 @@ final class TestGrain extends GrainBase
         $this->lastMethodIndex = $request->getMethodIndex();
     }
 
-    protected function onMessage(mixed $message, ContextInterface $context): void
+    protected function onMessage(object $message, ContextInterface $context): void
     {
         $this->messageReceived = true;
+    }
+
+    protected function onStarted(ContextInterface $context): void
+    {
+        $this->startedReceived = true;
+    }
+
+    protected function onStopping(ContextInterface $context): void
+    {
+        $this->stoppingReceived = true;
     }
 
     public function callRespondGrain(ContextInterface $context, \Google\Protobuf\Internal\Message $response): void

@@ -11,10 +11,12 @@ use Phluxor\Cluster\Cluster;
 use Phluxor\Cluster\ClusterTopologyEvent;
 use Phluxor\Cluster\Member;
 use Phluxor\Cluster\ProtoBuf\ActorStatistics;
+use Phluxor\Cluster\ProtoBuf\ClusterTopology;
 use Phluxor\Cluster\ProtoBuf\GossipKeyValue;
 use Phluxor\Cluster\ProtoBuf\GossipRequest;
 use Phluxor\Cluster\ProtoBuf\GossipResponse;
 use Phluxor\Cluster\ProtoBuf\GossipState;
+use Phluxor\Cluster\ProtoBuf\Member as ProtoBufMember;
 use Phluxor\Cluster\ProtoBuf\MemberHeartbeat;
 use Phluxor\EventStream\Subscription;
 use Swoole\Lock;
@@ -166,8 +168,11 @@ final class Gossiper implements GossipRequestHandler
         $this->sendHeartbeat();
 
         $this->mutex->lock_read();
-        $members = $this->currentMembers;
-        $this->mutex->unlock();
+        try {
+            $members = $this->currentMembers;
+        } finally {
+            $this->mutex->unlock();
+        }
 
         $selfAddress = $this->cluster->config()->address();
         $others = array_values(
@@ -182,9 +187,12 @@ final class Gossiper implements GossipRequestHandler
         $selected = $this->selectRandomMembers($others, $fanOut);
 
         $this->mutex->lock_read();
-        $state = $this->informer->toProtoBuf();
-        $localMemberId = $this->informer->localMemberId();
-        $this->mutex->unlock();
+        try {
+            $state = $this->informer->toProtoBuf();
+            $localMemberId = $this->informer->localMemberId();
+        } finally {
+            $this->mutex->unlock();
+        }
 
         foreach ($selected as $member) {
             $this->sendGossipToMember($member, $state, $localMemberId);
@@ -299,9 +307,44 @@ final class Gossiper implements GossipRequestHandler
             foreach ($event->left() as $member) {
                 $this->informer->removeMember($member->id());
             }
+
+            // トポロジーをゴシップ状態に設定して他ノードへ伝播させる
+            $topology = $this->buildClusterTopology($event);
+            $this->informer->setState(
+                GossipKeys::TOPOLOGY,
+                $topology->serializeToString(),
+                ClusterTopology::class
+            );
         } finally {
             $this->mutex->unlock();
         }
+    }
+
+    private function buildClusterTopology(ClusterTopologyEvent $event): ClusterTopology
+    {
+        $topology = new ClusterTopology();
+        $topology->setTopologyHash($event->topologyHash());
+        $topology->setMembers($this->membersToProtoBuf($event->members()));
+        $topology->setJoined($this->membersToProtoBuf($event->joined()));
+        $topology->setLeft($this->membersToProtoBuf($event->left()));
+        $topology->setBlocked($event->blocked());
+        return $topology;
+    }
+
+    /**
+     * @param list<Member> $members
+     * @return list<ProtoBufMember>
+     */
+    private function membersToProtoBuf(array $members): array
+    {
+        return array_map(function (Member $member): ProtoBufMember {
+            $pb = new ProtoBufMember();
+            $pb->setHost($member->host());
+            $pb->setPort($member->port());
+            $pb->setId($member->id());
+            $pb->setKinds($member->kinds());
+            return $pb;
+        }, $members);
     }
 
     /**

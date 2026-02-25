@@ -29,7 +29,9 @@ final class PartitionIdentityLookup implements IdentityLookupInterface
     public function setup(Cluster $cluster, array $kinds, bool $isClient): void
     {
         $this->manager = new PartitionManager($cluster);
-        $this->manager->start();
+        // client モードでも topology 監視とリモート activation 解決が必要。
+        // ただし placement actor のローカル起動は member モード時のみ行う。
+        $this->manager->start($isClient);
     }
 
     public function shutdown(): void

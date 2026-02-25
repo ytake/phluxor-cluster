@@ -16,7 +16,8 @@ final readonly class ClusterConfig
         private int $gossipIntervalMs = 300,
         private int $gossipFanOut = 3,
         private int $heartbeatExpirationMs = 20000,
-        private int $requestTimeoutSeconds = 5
+        private int $requestTimeoutSeconds = 5,
+        private int $pubSubSubscriberTimeoutSeconds = 5
     ) {
     }
 
@@ -68,6 +69,11 @@ final readonly class ClusterConfig
     public function requestTimeoutSeconds(): int
     {
         return $this->requestTimeoutSeconds;
+    }
+
+    public function pubSubSubscriberTimeoutSeconds(): int
+    {
+        return $this->pubSubSubscriberTimeoutSeconds;
     }
 
     public function address(): string

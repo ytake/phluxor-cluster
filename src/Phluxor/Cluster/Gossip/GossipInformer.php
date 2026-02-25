@@ -68,12 +68,18 @@ final class GossipInformer
     public function toProtoBuf(): GossipState
     {
         $gossipState = new GossipState();
+        $gossipMembers = $gossipState->getMembers();
         foreach ($this->state as $memberId => $values) {
             $memberState = new GossipMemberState();
+            $memberValues = $memberState->getValues();
             foreach ($values as $key => $kv) {
-                $memberState->getValues()[$key] = $kv;
+                // Google Protobuf の MapField は getValues()/getMembers() で返される
+                // オブジェクトへの offsetSet() が元の Message に直接反映される。
+                $memberValues[$key] = $kv;
             }
-            $gossipState->getMembers()[$memberId] = $memberState;
+            // $gossipMembers は $gossipState->getMembers() が返す MapField への参照であり、
+            // offsetSet() による代入は $gossipState 内部に直接反映される。
+            $gossipMembers[$memberId] = $memberState;
         }
         return $gossipState;
     }
