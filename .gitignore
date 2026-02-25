@@ -10,4 +10,4 @@ vendor/
 .takt
 .codacy
 composer.lock
-docs/process/
+docs/

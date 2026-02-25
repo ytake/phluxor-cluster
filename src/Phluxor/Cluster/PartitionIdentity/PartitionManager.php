@@ -39,6 +39,8 @@ final class PartitionManager
 
     private int $currentTopologyHash = 0;
 
+    private bool $started = false;
+
     public function __construct(
         private readonly Cluster $cluster
     ) {
@@ -46,17 +48,19 @@ final class PartitionManager
         $this->rdvMutex = new Lock(SWOOLE_RWLOCK);
     }
 
-    public function start(): void
+    public function start(bool $isClient = false): void
     {
         $system = $this->cluster->actorSystem();
-        $cluster = $this->cluster;
+        if (!$isClient) {
+            $cluster = $this->cluster;
 
-        $props = Props::fromProducer(
-            fn() => new PartitionPlacementActor($cluster)
-        );
+            $props = Props::fromProducer(
+                fn() => new PartitionPlacementActor($cluster)
+            );
 
-        $result = $system->root()->spawnNamed($props, self::PARTITION_ACTIVATOR_ACTOR_NAME);
-        $this->placementActor = $result->getRef();
+            $result = $system->root()->spawnNamed($props, self::PARTITION_ACTIVATOR_ACTOR_NAME);
+            $this->placementActor = $result->getRef();
+        }
 
         $this->topologySub = $system->getEventStream()?->subscribe(
             function (mixed $event): void {
@@ -65,6 +69,7 @@ final class PartitionManager
                 }
             }
         );
+        $this->started = true;
     }
 
     public function stop(): void
@@ -81,6 +86,8 @@ final class PartitionManager
             $future?->wait();
             $this->placementActor = null;
         }
+
+        $this->started = false;
     }
 
     public function get(ClusterIdentity $clusterIdentity): ?Ref
@@ -127,7 +134,16 @@ final class PartitionManager
         }
 
         $response = $result->value();
-        if (!$response instanceof ActivationResponse || $response->getFailed()) {
+        if (!$response instanceof ActivationResponse) {
+            return null;
+        }
+
+        $responseTopologyHash = (int) $response->getTopologyHash();
+        if ($responseTopologyHash !== 0 && $responseTopologyHash !== $topologyHash) {
+            return null;
+        }
+
+        if ($response->getFailed()) {
             return null;
         }
 
@@ -137,7 +153,7 @@ final class PartitionManager
 
     public function removePid(ClusterIdentity $clusterIdentity, Ref $pid): void
     {
-        if ($this->placementActor === null) {
+        if (!$this->started) {
             return;
         }
 

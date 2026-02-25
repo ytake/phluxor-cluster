@@ -59,7 +59,11 @@ final class PartitionIdentityLookupTest extends TestCase
         $rootContext->expects(self::never())
             ->method('spawnNamed');
 
+        $subscription = $this->createMock(Subscription::class);
         $eventStream = $this->createMock(EventStream::class);
+        $eventStream->expects(self::once())
+            ->method('subscribe')
+            ->willReturn($subscription);
 
         $actorSystem = $this->createMock(ActorSystem::class);
         $actorSystem->method('root')->willReturn($rootContext);
@@ -84,7 +88,7 @@ final class PartitionIdentityLookupTest extends TestCase
         // isClient=true: PlacementActorをスポーンしない
         $lookup->setup($cluster, [], true);
 
-        // クライアントノードはGrainをアクティベートできない（getNullを返す）
+        // トポロジー未受信時は解決先が無いため null を返す
         $identity = new ClusterIdentity('user-1', 'UserGrain');
         self::assertNull($lookup->get($identity));
     }

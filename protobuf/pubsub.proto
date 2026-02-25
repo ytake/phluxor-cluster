@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package cluster;
+
+import "actor.proto";
+import "cluster.proto";
+
+option php_namespace = "Phluxor\\Cluster\\ProtoBuf";
+option php_metadata_namespace = "Phluxor\\Cluster\\Metadata";
+
+// --- PubSub: 購読者管理 ---
+
+// 購読者を PID か ClusterIdentity で識別する
+message SubscriberIdentity {
+  oneof identity {
+    actor.Pid pid = 1;
+    ClusterIdentity cluster_identity = 2;
+  }
+}
+
+// 購読者のリスト
+message Subscribers {
+  repeated SubscriberIdentity subscribers = 1;
+}
+
+// 購読リクエスト（Publisher/Subscriber → TopicActor）
+message SubscribeRequest {
+  SubscriberIdentity subscriber = 1;
+}
+
+// 購読レスポンス
+message SubscribeResponse {
+}
+
+// 購読解除リクエスト
+message UnsubscribeRequest {
+  SubscriberIdentity subscriber = 1;
+}
+
+// 購読解除レスポンス
+message UnsubscribeResponse {
+}
+
+// --- PubSub: メッセージ配信 ---
+
+// メッセージエンベロープ（シリアライズされたメッセージとメタデータ）
+message PubSubEnvelope {
+  int32 type_id = 1;
+  bytes message_data = 2;
+  int32 serializer_id = 3;
+}
+
+// メッセージバッチの転送表現（Publisher → TopicActor）
+message PubSubBatchTransport {
+  repeated string type_names = 1;
+  repeated PubSubEnvelope envelopes = 2;
+}
+
+// TopicActor → DeliveryActor へのバッチ配信リクエスト
+message DeliverBatchRequestTransport {
+  Subscribers subscribers = 1;
+  PubSubBatchTransport batch = 2;
+  string topic = 3;
+}
+
+// 自動応答付きバッチ転送表現（DeliveryActor → Subscriber）
+message PubSubAutoRespondBatchTransport {
+  repeated string type_names = 1;
+  repeated PubSubEnvelope envelopes = 2;
+}
+
+// --- PubSub: 初期化・確認 ---
+
+// TopicActor 初期化メッセージ
+message PubSubInitialize {
+  int64 idle_timeout_ms = 1;
+}
+
+// 確認メッセージ
+message Acknowledge {
+}
+
+// 発行ステータス
+enum PublishStatus {
+  Ok = 0;
+  Failed = 1;
+}
+
+// 発行レスポンス
+message PublishResponse {
+  PublishStatus status = 1;
+}
+
+// --- PubSub: 配信失敗報告 ---
+
+// 配信ステータス
+enum DeliveryStatus {
+  Delivered = 0;
+  SubscriberNoLongerReachable = 1;
+  Timeout = 2;
+  OtherError = 127;
+}
+
+// 購読者への配信結果報告
+message SubscriberDeliveryReport {
+  SubscriberIdentity subscriber = 1;
+  DeliveryStatus status = 2;
+}
+
+// 配信失敗通知リクエスト（DeliveryActor → TopicActor）
+message NotifyAboutFailingSubscribersRequest {
+  repeated SubscriberDeliveryReport invalid_deliveries = 1;
+}
+
+// 配信失敗通知レスポンス
+message NotifyAboutFailingSubscribersResponse {
+}

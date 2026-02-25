@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Test\PartitionIdentity;
 
 use Phluxor\ActorSystem;
+use Phluxor\ActorSystem\Future;
+use Phluxor\ActorSystem\FutureResult;
 use Phluxor\ActorSystem\ProtoBuf\Pid;
 use Phluxor\ActorSystem\Ref;
 use Phluxor\ActorSystem\RootContext;
@@ -169,5 +171,128 @@ final class PartitionManagerTest extends TestCase
         // PlacementActor への send() が行われることを検証する
         self::assertNotNull($capturedCallback);
         ($capturedCallback)($event);
+    }
+
+    public function testStartAsClientDoesNotSpawnPlacementActorButCanRemovePid(): void
+    {
+        $rootContext = $this->createMock(RootContext::class);
+        $rootContext->expects(self::never())
+            ->method('spawnNamed');
+        $rootContext->expects(self::once())
+            ->method('send')
+            ->with(
+                self::callback(function (Ref $target): bool {
+                    return $target->protobufPid()->getAddress() === '127.0.0.1:8080'
+                        && $target->protobufPid()->getId() === 'partition-activator';
+                }),
+                self::callback(function (ActivationTerminated $msg): bool {
+                    $ci = $msg->getClusterIdentity();
+                    return $ci !== null
+                        && $ci->getIdentity() === 'user-1'
+                        && $ci->getKind() === 'UserGrain';
+                })
+            );
+
+        $subscription = $this->createMock(Subscription::class);
+        $eventStream = $this->createMock(EventStream::class);
+        $eventStream->method('subscribe')->willReturn($subscription);
+
+        $actorSystem = $this->createMock(ActorSystem::class);
+        $actorSystem->method('root')->willReturn($rootContext);
+        $actorSystem->method('getEventStream')->willReturn($eventStream);
+
+        $provider = $this->createMock(ClusterProviderInterface::class);
+        $config = new ClusterConfig(
+            name: 'test-cluster',
+            host: '127.0.0.1',
+            port: 8080,
+            clusterProvider: $provider,
+            identityLookup: $this->createMock(IdentityLookupInterface::class),
+            kindRegistry: new KindRegistry(),
+            requestTimeoutSeconds: 5,
+        );
+
+        $cluster = $this->createMock(Cluster::class);
+        $cluster->method('actorSystem')->willReturn($actorSystem);
+        $cluster->method('config')->willReturn($config);
+
+        $pid = new Pid();
+        $pid->setAddress('127.0.0.1:8080');
+        $pid->setId('test-actor-1');
+        $ref = new Ref($pid);
+        $clusterIdentity = new ClusterIdentity('user-1', 'UserGrain');
+
+        $manager = new PartitionManager($cluster);
+        $manager->start(true);
+        $manager->removePid($clusterIdentity, $ref);
+    }
+
+    public function testGetReturnsNullWhenActivationResponseTopologyHashMismatch(): void
+    {
+        $capturedCallback = null;
+        $subscription = $this->createMock(Subscription::class);
+        $eventStream = $this->createMock(EventStream::class);
+        $eventStream->method('subscribe')
+            ->willReturnCallback(function (callable $cb) use (&$capturedCallback, $subscription): Subscription {
+                $capturedCallback = $cb;
+                return $subscription;
+            });
+
+        $responsePid = new Pid();
+        $responsePid->setAddress('127.0.0.1:8081');
+        $responsePid->setId('user-1$01');
+
+        $activationResponse = new \Phluxor\Cluster\ProtoBuf\ActivationResponse();
+        $activationResponse->setPid($responsePid);
+        $activationResponse->setTopologyHash(9999); // mismatch
+
+        $future = $this->createMock(Future::class);
+        $future->method('result')->willReturn(new FutureResult($activationResponse, null));
+
+        $rootContext = $this->createMock(RootContext::class);
+        $rootContext->expects(self::never())->method('spawnNamed');
+        $rootContext->expects(self::once())
+            ->method('requestFuture')
+            ->with(
+                self::callback(fn(Ref $target): bool => $target->protobufPid()->getAddress() === '127.0.0.1:8081'),
+                self::callback(fn(mixed $msg): bool => $msg instanceof \Phluxor\Cluster\ProtoBuf\ActivationRequest
+                    && $msg->getTopologyHash() === 1234),
+                5
+            )
+            ->willReturn($future);
+
+        $actorSystem = $this->createMock(ActorSystem::class);
+        $actorSystem->method('root')->willReturn($rootContext);
+        $actorSystem->method('getEventStream')->willReturn($eventStream);
+
+        $provider = $this->createMock(ClusterProviderInterface::class);
+        $config = new ClusterConfig(
+            name: 'test-cluster',
+            host: '127.0.0.1',
+            port: 8080,
+            clusterProvider: $provider,
+            identityLookup: $this->createMock(IdentityLookupInterface::class),
+            kindRegistry: new KindRegistry(),
+            requestTimeoutSeconds: 5,
+        );
+
+        $cluster = $this->createMock(Cluster::class);
+        $cluster->method('actorSystem')->willReturn($actorSystem);
+        $cluster->method('config')->willReturn($config);
+
+        $manager = new PartitionManager($cluster);
+        $manager->start(true);
+
+        self::assertNotNull($capturedCallback);
+        ($capturedCallback)(new ClusterTopologyEvent(
+            topologyHash: 1234,
+            members: [new Member('127.0.0.1', 8081, 'node-1', ['UserGrain'])],
+            joined: [],
+            left: [],
+            blocked: [],
+        ));
+
+        $result = $manager->get(new ClusterIdentity('user-1', 'UserGrain'));
+        self::assertNull($result);
     }
 }

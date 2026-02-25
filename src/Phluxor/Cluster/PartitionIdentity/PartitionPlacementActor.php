@@ -80,6 +80,14 @@ final class PartitionPlacementActor implements ActorInterface
             return;
         }
 
+        $requestTopologyHash = (int) $msg->getTopologyHash();
+        if ($requestTopologyHash !== 0 && $requestTopologyHash !== $this->currentTopologyHash) {
+            // 古いトポロジーでの activation 要求は受け付けず、
+            // caller 側に現在トポロジーを返して再解決を促す。
+            $this->respondFailed($context, $this->currentTopologyHash);
+            return;
+        }
+
         $key = $clusterIdentity->getKind() . '/' . $clusterIdentity->getIdentity();
 
         // request_id による冪等性チェック: 同一IDが既に処理済みの場合はスキップ
@@ -234,10 +242,13 @@ final class PartitionPlacementActor implements ActorInterface
         }
     }
 
-    private function respondFailed(ContextInterface $context): void
+    private function respondFailed(ContextInterface $context, ?int $topologyHash = null): void
     {
         $response = new ActivationResponse();
         $response->setFailed(true);
+        if ($topologyHash !== null) {
+            $response->setTopologyHash($topologyHash);
+        }
         $context->respond($response);
     }
 }

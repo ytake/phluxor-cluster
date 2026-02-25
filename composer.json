@@ -49,6 +49,9 @@
     "tests": [
       "./vendor/bin/phpunit"
     ],
+    "integration-tests": [
+      "./scripts/run-integration-tests.sh"
+    ],
     "cs": [
       "Composer\\Config::disableProcessTimeout",
       "phpcs --standard=./phpcs.xml --ignore=*/ProtoBuf/*,*/Metadata/* src tests"
